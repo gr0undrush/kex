@@ -297,7 +297,13 @@ func (s *Store) Create(password string) (string, error) {
 	}
 	cfg := newConfig()
 	imported := ""
-	for _, lp := range s.legacyPaths() {
+	// Old unencrypted configs are only imported into the very first vault.
+	marker := filepath.Join(s.dir, "legacy-checked")
+	paths := s.legacyPaths()
+	if _, err := os.Stat(marker); err == nil {
+		paths = nil
+	}
+	for _, lp := range paths {
 		b, err := os.ReadFile(lp)
 		if err != nil {
 			continue
@@ -327,6 +333,7 @@ func (s *Store) Create(password string) (string, error) {
 		s.lockLocked()
 		return "", err
 	}
+	_ = os.WriteFile(marker, []byte("1"), 0o600)
 	return imported, nil
 }
 

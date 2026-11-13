@@ -296,7 +296,7 @@ async function showVault(errMsg = '') {
   $('#vPath').textContent = st.path
   $('#vConfirmRow').style.display = creating ? '' : 'none'
   $('#vHint').style.display = creating ? '' : 'none'
-  $('#vNew').style.display = creating ? '' : 'none'
+  $('#vNew').textContent = creating ? 'Change location…' : 'Create new vault…'
   $('#vSubmit').textContent = creating ? 'Create vault' : 'Unlock'
   $('#vErr').textContent = errMsg
   $('#vPass').value = ''
@@ -336,8 +336,29 @@ $('#vaultForm').addEventListener('submit', async (e) => {
 $('#vOpen').addEventListener('click', async () => {
   try { if (await ChooseVaultFile()) await showVault() } catch (err) { await showVault(cleanErr(err)) }
 })
-$('#vNew').addEventListener('click', async () => {
-  try { if (await ChooseNewVaultPath()) await showVault() } catch (err) { await showVault(cleanErr(err)) }
+// Pick a location for a new vault; if a vault file already exists there, offer to unlock it instead.
+async function pickNewVault() {
+  try {
+    if (await ChooseNewVaultPath()) {
+      const st = await VaultStatus()
+      await showVault(st.exists ? 'A vault already exists there. Enter its password to open it.' : '')
+      return
+    }
+  } catch (err) {
+    await showVault(cleanErr(err))
+    return
+  }
+  await showVault()
+}
+$('#vNew').addEventListener('click', pickNewVault)
+
+$('#newVaultBtn').addEventListener('click', async () => {
+  if (tabs.size && !confirm('Creating a new vault locks the current one and closes all open connections. Continue?')) return
+  for (const id of [...tabs.keys()]) closeTab(id)
+  await Lock()
+  sessions = []
+  renderSessions()
+  await pickNewVault()
 })
 
 $('#lockBtn').addEventListener('click', async () => {

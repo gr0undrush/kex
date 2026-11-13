@@ -25,6 +25,8 @@ encrypted file, by default `%AppData%\KEX\vault.kex`. KEX asks for the master pa
 - **Lock / switch vault** closes all connections, wipes the decrypted data from memory and shows the unlock
   screen again, where you can pick a different vault file.
 - **Master password…** changes the password (re-encrypts with a new salt).
+- **New vault…** (sidebar, or "Create new vault…" on the unlock screen) locks the current vault, asks where to
+  create the new file and sets a separate master password for it. If the chosen file already exists, KEX offers to unlock it instead.
 - There is no recovery if the master password is forgotten.
 - If an old unencrypted config from GoSSH/Shellfinch (`%AppData%\Shellfinch` or `%AppData%\GoSSH`) exists,
   it is imported when the vault is created and KEX offers to delete the old file. Passwords stored by the old
@@ -50,7 +52,8 @@ run once from the project root:
     powershell -ExecutionPolicy Bypass -File .\setup-legacy-crypto.ps1
 
 It copies x/crypto into third_party\crypto, adds the two ciphers to ssh\cipher.go and points go.mod at the copy.
-Manual alternative: add these two lines next to the `aes128cbcID` entry in the `cipherModes` map and use a
+Manual alternative: add these two lines next to the aes128-cbc entry (`aes128cbcID` or `InsecureCipherAES128CBC`,
+depending on the version) in the `cipherModes` map of ssh\cipher.go and use a
 `replace golang.org/x/crypto => ./third_party/crypto` directive:
 
     "aes192-cbc": {24, aes.BlockSize, newAESCBCCipher},
