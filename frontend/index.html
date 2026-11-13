@@ -1,0 +1,108 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>KEX</title>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <div class="side-head">
+        <span>Sessions</span>
+        <button id="newSession" title="New session">+</button>
+      </div>
+      <ul id="sessions"></ul>
+      <div class="foot">
+        <button id="settingsBtn">⚙ Settings</button>
+        <button id="exportBtn" title="Save a copy of the encrypted vault">⇪ Export vault…</button>
+        <button id="pwBtn">🔑 Master password…</button>
+        <button id="lockBtn" title="Close all connections and lock">🔒 Lock / switch vault</button>
+      </div>
+    </aside>
+    <main>
+      <div id="tabbar"></div>
+      <div id="panes"></div>
+    </main>
+  </div>
+
+  <dialog id="sessDlg">
+    <form id="sessForm">
+      <h3>Session</h3>
+      <label>Name <input id="sName" placeholder="optional" /></label>
+      <label>Host <input id="sHost" required placeholder="192.168.1.10 or example.com" /></label>
+      <label>Port <input id="sPort" type="number" min="1" max="65535" value="22" /></label>
+      <label>Username <input id="sUser" required /></label>
+      <label>Authentication
+        <select id="sAuth"><option value="key">Private key</option><option value="password">Password</option></select>
+      </label>
+      <label id="sKeyRow">Private key
+        <span class="row"><input id="sKey" placeholder="C:\Users\you\.ssh\id_ed25519" /><button type="button" id="sBrowse">Browse…</button></span>
+      </label>
+      <label id="sPassRow"><input id="sSave" type="checkbox" /> Remember password (Windows Credential Manager)</label>
+      <label><input id="sLegacy" type="checkbox" /> Allow legacy algorithms (aes128/192/256-cbc, diffie-hellman-group1-sha1, ssh-rsa/ssh-dss)</label>
+      <div class="actions">
+        <button type="button" id="sCancel">Cancel</button>
+        <button type="submit" class="primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="setDlg">
+    <form id="setForm">
+      <h3>Terminal settings</h3>
+      <label>Font family <input id="tFont" /></label>
+      <label>Font size <input id="tSize" type="number" min="6" max="72" /></label>
+      <label>Foreground <input id="tFg" type="color" /></label>
+      <label>Background <input id="tBg" type="color" /></label>
+      <div class="actions">
+        <button type="button" id="tCancel">Cancel</button>
+        <button type="submit" class="primary">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="passDlg">
+    <form id="passForm">
+      <h3 id="passTitle">Key passphrase</h3>
+      <label><input id="pPass" type="password" autocomplete="off" /></label>
+      <div class="actions">
+        <button type="button" id="pCancel">Cancel</button>
+        <button type="submit" class="primary">Connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="vaultDlg">
+    <form id="vaultForm">
+      <h3 id="vTitle">Unlock KEX</h3>
+      <div id="vPath"></div>
+      <label>Master password <input id="vPass" type="password" autocomplete="current-password" /></label>
+      <label id="vConfirmRow">Repeat password <input id="vPass2" type="password" autocomplete="new-password" /></label>
+      <div id="vHint" class="hint">At least 8 characters. It protects all saved sessions, settings and remembered passwords. It cannot be recovered if you forget it.</div>
+      <div id="vErr" class="err"></div>
+      <div class="actions">
+        <button type="button" id="vOpen">Open other vault…</button>
+        <button type="button" id="vNew">Choose location…</button>
+        <button type="submit" id="vSubmit" class="primary">Unlock</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="pwDlg">
+    <form id="pwForm">
+      <h3>Change master password</h3>
+      <label>Current password <input id="cpOld" type="password" autocomplete="current-password" /></label>
+      <label>New password <input id="cpNew" type="password" autocomplete="new-password" /></label>
+      <label>Repeat new password <input id="cpNew2" type="password" autocomplete="new-password" /></label>
+      <div id="cpErr" class="err"></div>
+      <div class="actions">
+        <button type="button" id="cpCancel">Cancel</button>
+        <button type="submit" class="primary">Change</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

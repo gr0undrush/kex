@@ -1,0 +1,15 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "kex",
+  "outputfilename": "kex",
+  "frontend:install": "npm install",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "info": {
+    "companyName": "KEX",
+    "productName": "KEX",
+    "productVersion": "0.2.0",
+    "comments": "Tabbed SSH client with an encrypted vault"
+  }
+}
