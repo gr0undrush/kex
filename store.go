@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
@@ -32,6 +33,8 @@ type Session struct {
 	SavePassword bool   `json:"savePassword"`
 	// allow weak algorithms for old devices (CBC ciphers, DH group1, ssh-rsa/ssh-dss)
 	Legacy bool `json:"legacy"`
+	// folder path, "/"-separated for nesting; "" = top level
+	Folder string `json:"folder"`
 }
 
 type Settings struct {
@@ -47,6 +50,13 @@ type Config struct {
 	Settings   Settings          `json:"settings"`
 	KnownHosts map[string]string `json:"knownHosts"`
 	Passwords  map[string]string `json:"passwords"` // session id -> remembered password
+	Folders    []string          `json:"folders"`   // all folder paths, including empty ones
+}
+
+// Library is what the UI shows: sessions plus the folder tree.
+type Library struct {
+	Sessions []Session `json:"sessions"`
+	Folders  []string  `json:"folders"`
 }
 
 func defaultSettings() Settings {
@@ -428,10 +438,17 @@ func (s *Store) Export(dest string) error {
 
 // ----------------------------------------------------- sessions and settings
 
-func (s *Store) Sessions() []Session {
+func (s *Store) libraryLocked() Library {
+	return Library{
+		Sessions: append([]Session{}, s.cfg.Sessions...),
+		Folders:  append([]string{}, s.cfg.Folders...),
+	}
+}
+
+func (s *Store) Library() Library {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]Session{}, s.cfg.Sessions...)
+	return s.libraryLocked()
 }
 
 func (s *Store) Session(id string) (Session, bool) {
@@ -448,12 +465,184 @@ func (s *Store) Session(id string) (Session, bool) {
 	return Session{}, false
 }
 
-func (s *Store) SaveSession(in Session) ([]Session, error) {
+// ---- folders ----
+
+func normFolder(p string) string {
+	p = strings.ReplaceAll(p, "\\", "/")
+	var out []string
+	for _, seg := range strings.Split(p, "/") {
+		seg = strings.TrimSpace(seg)
+		if seg != "" && seg != "." && seg != ".." {
+			out = append(out, seg)
+		}
+	}
+	return strings.Join(out, "/")
+}
+
+func parentOf(p string) string {
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[:i]
+	}
+	return ""
+}
+
+// inFolder reports whether p is the folder itself or lies inside it.
+func inFolder(p, folder string) bool {
+	return p == folder || strings.HasPrefix(p, folder+"/")
+}
+
+func sortedUnique(list []string) []string {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(list))
+	for _, f := range list {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			out = append(out, f)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return strings.ToLower(out[i]) < strings.ToLower(out[j]) })
+	return out
+}
+
+// ensureFolderLocked adds the folder and all its ancestors.
+func (s *Store) ensureFolderLocked(p string) {
+	p = normFolder(p)
+	if p == "" {
+		return
+	}
+	list := append([]string{}, s.cfg.Folders...)
+	acc := ""
+	for _, seg := range strings.Split(p, "/") {
+		if acc == "" {
+			acc = seg
+		} else {
+			acc += "/" + seg
+		}
+		list = append(list, acc)
+	}
+	s.cfg.Folders = sortedUnique(list)
+}
+
+func (s *Store) CreateFolder(path string) (Library, error) {
+	path = normFolder(path)
+	if path == "" {
+		return Library{}, errors.New("folder name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.unlocked {
+		return Library{}, errLocked
+	}
+	for _, f := range s.cfg.Folders {
+		if f == path {
+			return Library{}, errors.New("a folder with this name already exists")
+		}
+	}
+	s.ensureFolderLocked(path)
+	return s.libraryLocked(), s.saveLocked()
+}
+
+// RenameFolder renames or moves a folder (with its subfolders and sessions) to newPath.
+func (s *Store) RenameFolder(oldPath, newPath string) (Library, error) {
+	oldPath, newPath = normFolder(oldPath), normFolder(newPath)
+	if oldPath == "" || newPath == "" {
+		return Library{}, errors.New("folder name is required")
+	}
+	if strings.HasPrefix(newPath, oldPath+"/") {
+		return Library{}, errors.New("a folder cannot be moved into itself")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.unlocked {
+		return Library{}, errLocked
+	}
+	if newPath == oldPath {
+		return s.libraryLocked(), nil
+	}
+	exists := false
+	for _, f := range s.cfg.Folders {
+		if f == oldPath {
+			exists = true
+		}
+		if f == newPath {
+			return Library{}, errors.New("a folder with this name already exists")
+		}
+	}
+	if !exists {
+		return Library{}, errors.New("folder not found")
+	}
+	repl := func(p string) string {
+		if inFolder(p, oldPath) {
+			return newPath + p[len(oldPath):]
+		}
+		return p
+	}
+	list := make([]string, 0, len(s.cfg.Folders))
+	for _, f := range s.cfg.Folders {
+		list = append(list, repl(f))
+	}
+	for i := range s.cfg.Sessions {
+		s.cfg.Sessions[i].Folder = repl(s.cfg.Sessions[i].Folder)
+	}
+	s.cfg.Folders = sortedUnique(list)
+	s.ensureFolderLocked(newPath)
+	return s.libraryLocked(), s.saveLocked()
+}
+
+// DeleteFolder removes the folder and its subfolders. Sessions inside are kept
+// and moved to the deleted folder's parent.
+func (s *Store) DeleteFolder(path string) (Library, error) {
+	path = normFolder(path)
+	if path == "" {
+		return Library{}, errors.New("folder name is required")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.unlocked {
+		return Library{}, errLocked
+	}
+	parent := parentOf(path)
+	kept := make([]string, 0, len(s.cfg.Folders))
+	for _, f := range s.cfg.Folders {
+		if !inFolder(f, path) {
+			kept = append(kept, f)
+		}
+	}
+	s.cfg.Folders = kept
+	for i := range s.cfg.Sessions {
+		if inFolder(s.cfg.Sessions[i].Folder, path) {
+			s.cfg.Sessions[i].Folder = parent
+		}
+	}
+	return s.libraryLocked(), s.saveLocked()
+}
+
+func (s *Store) MoveSession(id, folder string) (Library, error) {
+	folder = normFolder(folder)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.unlocked {
+		return Library{}, errLocked
+	}
+	for i := range s.cfg.Sessions {
+		if s.cfg.Sessions[i].ID == id {
+			s.cfg.Sessions[i].Folder = folder
+			s.ensureFolderLocked(folder)
+			return s.libraryLocked(), s.saveLocked()
+		}
+	}
+	return Library{}, errors.New("session not found")
+}
+
+// ---- sessions ----
+
+func (s *Store) SaveSession(in Session) (Library, error) {
 	in.Host = strings.TrimSpace(in.Host)
 	in.Username = strings.TrimSpace(in.Username)
 	in.Name = strings.TrimSpace(in.Name)
+	in.Folder = normFolder(in.Folder)
 	if in.Host == "" || in.Username == "" {
-		return nil, errors.New("host and username are required")
+		return Library{}, errors.New("host and username are required")
 	}
 	if in.Port <= 0 || in.Port > 65535 {
 		in.Port = 22
@@ -468,7 +657,7 @@ func (s *Store) SaveSession(in Session) ([]Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.unlocked {
-		return nil, errLocked
+		return Library{}, errLocked
 	}
 	found := false
 	if in.ID != "" {
@@ -487,14 +676,15 @@ func (s *Store) SaveSession(in Session) ([]Session, error) {
 	if !(in.AuthMethod == "password" && in.SavePassword) {
 		delete(s.cfg.Passwords, in.ID)
 	}
-	return append([]Session{}, s.cfg.Sessions...), s.saveLocked()
+	s.ensureFolderLocked(in.Folder)
+	return s.libraryLocked(), s.saveLocked()
 }
 
-func (s *Store) DeleteSession(id string) ([]Session, error) {
+func (s *Store) DeleteSession(id string) (Library, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.unlocked {
-		return nil, errLocked
+		return Library{}, errLocked
 	}
 	out := make([]Session, 0, len(s.cfg.Sessions))
 	for _, x := range s.cfg.Sessions {
@@ -504,7 +694,7 @@ func (s *Store) DeleteSession(id string) ([]Session, error) {
 	}
 	s.cfg.Sessions = out
 	delete(s.cfg.Passwords, id)
-	return append([]Session{}, out...), s.saveLocked()
+	return s.libraryLocked(), s.saveLocked()
 }
 
 func (s *Store) Settings() Settings {

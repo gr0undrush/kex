@@ -32,6 +32,13 @@ encrypted file, by default `%AppData%\KEX\vault.kex`. KEX asks for the master pa
   it is imported when the vault is created and KEX offers to delete the old file. Passwords stored by the old
   versions in Windows Credential Manager are not migrated; enter them once and tick "Remember password" again.
 
+## Folders
+Sessions can be organized in nested folders (stored in the vault). Use 📁 in the sidebar header for a new folder,
+and the buttons on a folder row for a new session or subfolder inside it, rename/move (edit the path, e.g.
+`Production/Web`) and delete. Deleting a folder removes it and its subfolders; its sessions are kept and moved up
+one level. Drag a session onto a folder (or onto empty space for the top level) to move it, or pick the folder in
+the session dialog. Collapsed/expanded state is remembered.
+
 ## Other notes
 - Auth: private key file (passphrase asked on connect, never stored) or password (asked on connect;
   optionally remembered inside the encrypted vault).

@@ -10,7 +10,10 @@
     <aside id="sidebar">
       <div class="side-head">
         <span>Sessions</span>
-        <button id="newSession" title="New session">+</button>
+        <span class="btns">
+          <button id="newFolder" title="New folder">📁</button>
+          <button id="newSession" title="New session">+</button>
+        </span>
       </div>
       <ul id="sessions"></ul>
       <div class="foot">
@@ -31,6 +34,7 @@
     <form id="sessForm">
       <h3>Session</h3>
       <label>Name <input id="sName" placeholder="optional" /></label>
+      <label>Folder <select id="sFolder"></select></label>
       <label>Host <input id="sHost" required placeholder="192.168.1.10 or example.com" /></label>
       <label>Port <input id="sPort" type="number" min="1" max="65535" value="22" /></label>
       <label>Username <input id="sUser" required /></label>
@@ -70,6 +74,18 @@
       <div class="actions">
         <button type="button" id="pCancel">Cancel</button>
         <button type="submit" class="primary">Connect</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="folderDlg">
+    <form id="folderForm">
+      <h3 id="fTitle">New folder</h3>
+      <label>Folder path <input id="fName" placeholder="Production/Web" /></label>
+      <div class="hint">Use / to nest folders, for example Production/Web.</div>
+      <div class="actions">
+        <button type="button" id="fCancel">Cancel</button>
+        <button type="submit" class="primary">OK</button>
       </div>
     </form>
   </dialog>

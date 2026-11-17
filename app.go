@@ -118,11 +118,21 @@ func (a *App) ExportVault() (string, error) {
 
 // ---- bound methods: sessions & settings ----
 
-func (a *App) ListSessions() []Session { return a.store.Sessions() }
+func (a *App) ListLibrary() Library { return a.store.Library() }
 
-func (a *App) SaveSession(s Session) ([]Session, error) { return a.store.SaveSession(s) }
+func (a *App) SaveSession(s Session) (Library, error) { return a.store.SaveSession(s) }
 
-func (a *App) DeleteSession(id string) ([]Session, error) { return a.store.DeleteSession(id) }
+func (a *App) DeleteSession(id string) (Library, error) { return a.store.DeleteSession(id) }
+
+func (a *App) CreateFolder(path string) (Library, error) { return a.store.CreateFolder(path) }
+
+func (a *App) RenameFolder(oldPath, newPath string) (Library, error) {
+	return a.store.RenameFolder(oldPath, newPath)
+}
+
+func (a *App) DeleteFolder(path string) (Library, error) { return a.store.DeleteFolder(path) }
+
+func (a *App) MoveSession(id, folder string) (Library, error) { return a.store.MoveSession(id, folder) }
 
 func (a *App) GetSettings() Settings { return a.store.Settings() }
 

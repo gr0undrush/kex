@@ -3,7 +3,8 @@ import './style.css'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import {
-  ListSessions, SaveSession, DeleteSession, GetSettings, SaveSettings,
+  ListLibrary, SaveSession, DeleteSession, CreateFolder, RenameFolder, DeleteFolder, MoveSession,
+  GetSettings, SaveSettings,
   PickKeyFile, Connect, Write, Resize, Close, SetClipboard, GetClipboard,
   VaultStatus, Unlock, CreateVault, DeleteLegacyConfig, ChangePassword,
   ChooseVaultFile, ChooseNewVaultPath, ExportVault, Lock,
@@ -13,6 +14,7 @@ import { EventsOn } from '../wailsjs/runtime/runtime'
 const $ = (s) => document.querySelector(s)
 let settings = null
 let sessions = []
+let folders = []
 const tabs = new Map()
 let active = null
 
@@ -146,30 +148,187 @@ new ResizeObserver(() => {
 }).observe($('#panes'))
 
 // ---------- sessions ----------
+function applyLibrary(lib) {
+  sessions = lib.sessions || []
+  folders = lib.folders || []
+  renderSessions()
+}
+
+const collapsed = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem('kex.collapsed') || '[]')) } catch (_) { return new Set() }
+})()
+const saveCollapsed = () => {
+  try { localStorage.setItem('kex.collapsed', JSON.stringify([...collapsed])) } catch (_) { /* ignore */ }
+}
+
+async function folderOp(fn) {
+  try { applyLibrary(await fn()) } catch (err) { alert(cleanErr(err)) }
+}
+
+function askFolderName(title, initial) {
+  return new Promise((resolve) => {
+    const dlg = $('#folderDlg')
+    $('#fTitle').textContent = title
+    $('#fName').value = initial
+    const done = (v) => {
+      $('#folderForm').onsubmit = null
+      $('#fCancel').onclick = null
+      dlg.oncancel = null
+      dlg.close()
+      resolve(v)
+    }
+    $('#folderForm').onsubmit = (e) => { e.preventDefault(); const v = $('#fName').value.trim(); if (v) done(v) }
+    $('#fCancel').onclick = () => done(null)
+    dlg.oncancel = (e) => { e.preventDefault(); done(null) }
+    dlg.showModal()
+    $('#fName').focus()
+    $('#fName').select()
+  })
+}
+
+function buildTree() {
+  const root = { path: '', name: '', folders: new Map(), sessions: [] }
+  const getNode = (path) => {
+    let node = root
+    let acc = ''
+    if (!path) return root
+    for (const seg of path.split('/')) {
+      acc = acc ? acc + '/' + seg : seg
+      if (!node.folders.has(seg)) node.folders.set(seg, { path: acc, name: seg, folders: new Map(), sessions: [] })
+      node = node.folders.get(seg)
+    }
+    return node
+  }
+  for (const f of folders) getNode(f)
+  for (const s of sessions) getNode(s.folder || '').sessions.push(s)
+  return root
+}
+
+const countSessions = (n) => n.sessions.length + [...n.folders.values()].reduce((sum, f) => sum + countSessions(f), 0)
+const byName = (a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+
 function renderSessions() {
   const ul = $('#sessions')
   ul.innerHTML = ''
-  for (const s of sessions) {
+  renderNode(ul, buildTree(), 0)
+}
+
+function renderNode(ul, node, depth) {
+  const pad = (10 + depth * 14) + 'px'
+  const stop = (fn) => (e) => { e.stopPropagation(); fn() }
+
+  for (const f of [...node.folders.values()].sort(byName)) {
+    const open = !collapsed.has(f.path)
     const li = document.createElement('li')
+    li.className = 'folder'
+    li.style.paddingLeft = pad
+    li.innerHTML = '<span class="chev"></span><span class="fname"></span><span class="count"></span>' +
+      '<span class="icons"><button class="addS" title="New session here">＋</button><button class="addF" title="New subfolder">📁</button>' +
+      '<button class="ren" title="Rename or move">✎</button><button class="del" title="Delete folder">🗑</button></span>'
+    li.querySelector('.chev').textContent = open ? '▾' : '▸'
+    li.querySelector('.fname').textContent = f.name
+    li.querySelector('.count').textContent = countSessions(f)
+    li.addEventListener('click', () => {
+      if (collapsed.has(f.path)) collapsed.delete(f.path); else collapsed.add(f.path)
+      saveCollapsed()
+      renderSessions()
+    })
+    li.querySelector('.addS').addEventListener('click', stop(() => editSession(blankSession(f.path))))
+    li.querySelector('.addF').addEventListener('click', stop(async () => {
+      const name = await askFolderName(`New folder inside "${f.path}"`, f.path + '/')
+      if (name) {
+        collapsed.delete(f.path)
+        saveCollapsed()
+        folderOp(() => CreateFolder(name))
+      }
+    }))
+    li.querySelector('.ren').addEventListener('click', stop(async () => {
+      const name = await askFolderName('Rename or move folder', f.path)
+      if (name && name !== f.path) folderOp(() => RenameFolder(f.path, name))
+    }))
+    li.querySelector('.del').addEventListener('click', stop(() => {
+      const parent = f.path.includes('/') ? f.path.slice(0, f.path.lastIndexOf('/')) : ''
+      const where = parent ? `"${parent}"` : 'the top level'
+      if (confirm(`Delete folder "${f.path}" and its subfolders?\nTheir sessions are kept and moved to ${where}.`)) {
+        folderOp(() => DeleteFolder(f.path))
+      }
+    }))
+    // drop a session onto the folder
+    li.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); li.classList.add('dropping') })
+    li.addEventListener('dragleave', () => li.classList.remove('dropping'))
+    li.addEventListener('drop', (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      li.classList.remove('dropping')
+      const id = e.dataTransfer.getData('text/plain')
+      if (id) folderOp(() => MoveSession(id, f.path))
+    })
+    ul.appendChild(li)
+    if (open) renderNode(ul, f, depth + 1)
+  }
+
+  for (const s of [...node.sessions].sort(byName)) {
+    const li = document.createElement('li')
+    li.style.paddingLeft = pad
+    li.draggable = true
     li.innerHTML = '<div class="info"><div class="name"></div><div class="sub"></div></div>' +
       '<span class="icons"><button class="edit" title="Edit">✎</button><button class="del" title="Delete">🗑</button></span>'
     li.querySelector('.name').textContent = s.name
     li.querySelector('.sub').textContent = `${s.username}@${s.host}:${s.port}`
-    li.addEventListener('click', () => openTab(s))
-    li.querySelector('.edit').addEventListener('click', (e) => { e.stopPropagation(); editSession(s) })
-    li.querySelector('.del').addEventListener('click', async (e) => {
-      e.stopPropagation()
-      if (confirm(`Delete session "${s.name}"?`)) {
-        sessions = await DeleteSession(s.id)
-        renderSessions()
-      }
+    li.addEventListener('dragstart', (e) => {
+      e.dataTransfer.setData('text/plain', s.id)
+      e.dataTransfer.effectAllowed = 'move'
     })
+    li.addEventListener('click', () => openTab(s))
+    li.querySelector('.edit').addEventListener('click', stop(() => editSession(s)))
+    li.querySelector('.del').addEventListener('click', stop(() => {
+      if (confirm(`Delete session "${s.name}"?`)) folderOp(() => DeleteSession(s.id))
+    }))
     ul.appendChild(li)
   }
 }
 
+// dropping on empty space moves a session to the top level
+const rootList = $('#sessions')
+rootList.addEventListener('dragover', (e) => { e.preventDefault(); rootList.classList.add('droproot') })
+rootList.addEventListener('dragleave', (e) => { if (e.target === rootList) rootList.classList.remove('droproot') })
+rootList.addEventListener('drop', (e) => {
+  e.preventDefault()
+  rootList.classList.remove('droproot')
+  const id = e.dataTransfer.getData('text/plain')
+  if (id) folderOp(() => MoveSession(id, ''))
+})
+window.addEventListener('dragend', () => {
+  rootList.classList.remove('droproot')
+  document.querySelectorAll('#sessions li.dropping').forEach((el) => el.classList.remove('dropping'))
+})
+
+$('#newFolder').addEventListener('click', async () => {
+  const name = await askFolderName('New folder', '')
+  if (name) folderOp(() => CreateFolder(name))
+})
+
+const blankSession = (folder = '') => ({
+  id: '', name: '', host: '', port: 22, username: '', keyPath: '',
+  authMethod: 'key', savePassword: false, legacy: false, folder,
+})
+
+function fillFolderSelect(selected) {
+  const sel = $('#sFolder')
+  sel.innerHTML = ''
+  const add = (value, label) => {
+    const o = document.createElement('option')
+    o.value = value
+    o.textContent = label
+    sel.appendChild(o)
+  }
+  add('', '(no folder)')
+  for (const f of folders) add(f, f.split('/').join(' / '))
+  sel.value = selected
+}
+
 let editingId = ''
-function editSession(s = { id: '', name: '', host: '', port: 22, username: '', keyPath: '', authMethod: 'key', savePassword: false, legacy: false }) {
+function editSession(s = blankSession()) {
   editingId = s.id
   $('#sName').value = s.name
   $('#sHost').value = s.host
@@ -179,6 +338,7 @@ function editSession(s = { id: '', name: '', host: '', port: 22, username: '', k
   $('#sAuth').value = s.authMethod || 'key'
   $('#sSave').checked = !!s.savePassword
   $('#sLegacy').checked = !!s.legacy
+  fillFolderSelect(s.folder || '')
   updateAuthRows()
   $('#sessDlg').showModal()
 }
@@ -199,7 +359,7 @@ $('#sBrowse').addEventListener('click', async () => {
 $('#sessForm').addEventListener('submit', async (e) => {
   e.preventDefault()
   try {
-    sessions = await SaveSession({
+    applyLibrary(await SaveSession({
       id: editingId,
       name: $('#sName').value,
       host: $('#sHost').value,
@@ -209,8 +369,8 @@ $('#sessForm').addEventListener('submit', async (e) => {
       authMethod: $('#sAuth').value,
       savePassword: $('#sAuth').value === 'password' && $('#sSave').checked,
       legacy: $('#sLegacy').checked,
-    })
-    renderSessions()
+      folder: $('#sFolder').value,
+    }))
     $('#sessDlg').close()
   } catch (err) {
     alert(String(err))
@@ -281,8 +441,7 @@ window.addEventListener('keydown', (e) => {
 async function loadAll() {
   settings = await GetSettings()
   applyChrome()
-  sessions = await ListSessions()
-  renderSessions()
+  applyLibrary(await ListLibrary())
 }
 
 const cleanErr = (e) => String(e).replace(/^Error:\s*/, '')
@@ -356,8 +515,7 @@ $('#newVaultBtn').addEventListener('click', async () => {
   if (tabs.size && !confirm('Creating a new vault locks the current one and closes all open connections. Continue?')) return
   for (const id of [...tabs.keys()]) closeTab(id)
   await Lock()
-  sessions = []
-  renderSessions()
+  applyLibrary({ sessions: [], folders: [] })
   await pickNewVault()
 })
 
@@ -365,8 +523,7 @@ $('#lockBtn').addEventListener('click', async () => {
   if (tabs.size && !confirm('Locking closes all open connections. Continue?')) return
   for (const id of [...tabs.keys()]) closeTab(id)
   await Lock()
-  sessions = []
-  renderSessions()
+  applyLibrary({ sessions: [], folders: [] })
   await showVault()
 })
 
